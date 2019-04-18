@@ -1,0 +1,214 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link id="favicon" rel="shortcut icon" href="img/icon.png">
+	<title>6-6 chess</title>
+	<style type="text/css">
+		#title { cursor:pointer; margin:20px 70px 10px; }
+		#title .info { cursor:help; }
+
+		#main .left, #main .right { float:left; margin:5px; }
+		#main:after { display:block; content:''; clear:both; }
+		#main .left .wrapper { margin-left:18px; padding:8px; border:1px dotted grey; }
+		#main .right .history-control { text-align:center; }
+		#main .right .history-control button { margin:2px 0; }
+		#main .right .history-control button.button-new-game,
+		#main .right .history-control button.button-new-analysis { width:100px; }
+
+		#main table { border-collapse:collapse; }
+		#main tr:last-child td { border:0; padding:2px; height:20px; }
+		#main td:first-child { border:0; padding:2px; width:15px; }
+		#main td { width:50px; height:50px; border:1px solid black; padding:5px; text-align:center; }
+		#main td.highlight { background:#ccc; }
+		#main td.chosen { background:yellow; }
+		#main td:after { width:100%; height:100%; border-radius:50%; border:1px solid black; }
+		#main td.p1:after { content:''; display:block; background:white; }
+		#main td.p2:after { content:''; display:block; background:black; border-color:white; }
+
+		#main .history { display:block; position:relative; width:110px; height:245px; border:1px solid black; overflow:auto; cursor:default; }
+		#main .history > div { margin:2px; }
+		#main .history > div:first-child { text-align:center; }
+		#main .history > div.active { background:cyan; }
+		#main .history > div > span:first-child { display:inline-block; text-align:right; width:30px; padding-right:2px; }
+		#main .history > .result { display:none; }
+		#main .history > .result.finish { display:block; text-align:center; background:#ccc; }
+
+		#main .player-control > * { vertical-align:middle; display:inline-block; }
+		#main .player-control { position:relative; text-align:center; }
+		#main .player-control.winner .trophy { display:block; position:absolute; left:0; top:0; bottom:0; margin:auto 0; }
+		#main .player-control.draw .handshake { display:block; position:absolute; left:-5px; top:0; bottom:0; margin:auto 0; }
+		#main .player-control .trophy { width:30px; height:30px; background:url('img/trophy.png') center/contain no-repeat; display:none; }
+		#main .player-control .handshake { width:40px; height:30px; background:url('img/handshake.png') center/contain no-repeat; display:none; }
+		#main .player-control span { width:70px; }
+		#main .player-control.turn span { font-weight:bold; }
+		#main .player-control.human .player.human { opacity:1; }
+		#main .player-control.human .player.computer { opacity:0.4; }
+		#main .player { width:40px; height:30px; border:2px solid green; border-radius:50%; margin:2px; }
+		#main .player.human { background:#ccc url('img/human.png') center/contain no-repeat; opacity:0.4; }
+		#main .player.computer { background:#ccc url('img/computer.png') center/contain no-repeat; opacity:1; }
+
+		#main .computer-settings { position:relative; }
+		#main .computer-settings.collapse { height:20px; overflow:hidden; }
+		#main .computer-settings .title-wrapper { height:20px; }
+		#main .computer-settings .title-wrapper > * { display:inline-block; vertical-align:middle; }
+		#main .computer-settings .title { position:relative; padding-left:20px; }
+		#main .computer-settings .title:before { position:absolute; display:block; content:'\25bc'; line-height:20px; width:20px; height:20px; top:0; left:0; cursor:pointer; }
+		#main .computer-settings.collapse .title:before { content:'\25b6'; }
+		#main .computer-settings .status { width:10px; height:10px; border-radius:50%; background:green; margin:0 10px 0 5px; }
+		#main .computer-settings .status.missing-worker { background:grey; }
+		#main .computer-settings .status.busy { background:red; }
+		#main .computer-settings .interrupt { display:none; width:15px; height:15px; background:url('img/stop.png') center/contain no-repeat; cursor:pointer; }
+		#main .computer-settings .interrupt.busy { display:inline-block; }
+		#main .computer-settings .setting > * { vertical-align:middle; }
+		#main .computer-settings .setting span:first-child { display:inline-block; width:85px; }
+		#main .computer-settings .setting input[type=number] { width:60px; text-align:center; }
+		#main .computer-settings .evaluation { position:absolute; display:block; cursor:pointer; top:0; right:0; text-align:right; }
+		#main .computer-settings .evaluation.hide { opacity:0; }
+		#main .computer-settings .evaluation.hide:hover { transition:opacity 2s; opacity:0.75; }
+		#main .computer-settings .evaluation .details-wrapper { font-size:10px; color:grey; }
+
+		#help-wrapper { display:none; position:fixed; top:0; bottom:0; left:0; right:0; z-index:10; background:rgba(0,0,0,0.5); }
+		#help-wrapper.show { display:block; }
+		#help { position:absolute; width:60%; height:60%; top:0; bottom:0; left:0; right:0; margin:auto; padding:20px; background:white; border:7px double grey; }
+		#help .close { position:absolute; top:0px; right:0px; padding:5px; font-size:25px; line-height:25px; cursor:pointer; }
+		#help .content { width:100%; height:100%; overflow:auto; }
+		#help ul { margin:0; }
+		#help span.piece1,
+		#help span.piece2,
+		#help span.piece3 { display:inline-block; vertical-align:middle; width:10px; height:10px; margin:1px; border-radius:50%; background:white; border:1px solid grey; }
+		#help span.piece3 { background:black; }
+
+		.dark { background:black; color:white; }
+		.dark #main td { border-color:white; }
+		.dark #main td.highlight { background:#666; }
+		.dark #main td.chosen { background:darkkhaki; }
+
+		.dark #main .history { border-color:white; }
+		.dark #main .history > div.active { background:blue; }
+		.dark #main .history > .result.finish { background:grey; }
+
+		.dark #help { background:black; }
+	</style>
+	<script src="endgame.js"></script>
+	<script src="board.js"></script>
+	<script src="game.js"></script>
+	<script>
+		document.addEventListener("DOMContentLoaded", function() {
+			try {
+				if (localStorage.getItem("theme") == "light") document.body.classList.remove("dark");
+			} catch (e) {
+			}
+			document.getElementById("title").addEventListener("click", function() {
+				document.body.classList.toggle("dark");
+				try {
+					localStorage.setItem("theme", document.body.classList.contains("dark") ? "dark" : "light");
+				} catch (e) {
+				}
+			});
+
+			document.getElementById("title").querySelector(".info").addEventListener("click", function(e) {
+				document.getElementById("help-wrapper").classList.toggle("show");
+				e.stopPropagation();
+			});
+
+			document.getElementById("help").querySelector(".moves-to-draw").innerText = MOVES_TO_DRAW;
+			document.getElementById("help").querySelector(".close").addEventListener("click", function(e) {
+				document.getElementById("help-wrapper").classList.remove("show");
+				e.stopPropagation();
+			});
+
+			window.addEventListener("keydown", function(e) {
+				switch (e.key) {
+					case "Esc":
+					case "Escape":
+						document.getElementById("help-wrapper").classList.remove("show");
+						break;
+				}
+			});
+
+			var match = window.location.search.match(/[?&]analysis=(-?\d+)(\d)/) || [];
+			g = new Game(document.getElementById("main"), +match[1] || null, +match[2] || null);
+		});
+	</script>
+</head>
+<body class="dark">
+	<h1 id="title" title="Toggle light/dark theme">6-6 Chess <span class="info" title="Help">&#9432;</span></h1>
+	<div id="main">
+		<div class="left">
+			<table></table>
+			<div class="wrapper">
+				<div class="computer-settings">
+					<div class="title-wrapper"><span class="title">Evaluation </span><span class="status"></span><span class="interrupt" title="Interrupt evaluation"></span></div>
+					<div class="evaluation">
+						<div class="score"></div>
+						<div class="details-wrapper">
+							<span>depth: </span><span class="depth"></span><br>
+							<span>table: </span><span class="table"></span><br>
+							<span>node: </span><span class="count"></span>
+						</div>
+					</div>
+					<div class="setting"><span>Time (ms):</span><input id="time-setting" type="number" min="1" value="500"></div>
+					<div class="setting"><span>Depth:</span><input id="depth-setting" type="number" min="1" value="8"></div>
+				</div>
+			</div>
+			<div class="player-control-wrapper wrapper">
+				<div class="player-control">
+					<div class="trophy" title="Winner"></div>
+					<div class="handshake" title="Draw"></div>
+					<span>Player 1</span>
+					<div class="player human" data-value="HUMAN"></div>
+					<div class="player computer" data-value="COMPUTER"></div>
+				</div>
+				<div class="player-control">
+					<div class="trophy" title="Winner"></div>
+					<div class="handshake" title="Draw"></div>
+					<span>Player 2</span>
+					<div class="player human" data-value="HUMAN"></div>
+					<div class="player computer" data-value="COMPUTER"></div>
+				</div>
+			</div>
+		</div>
+		<div class="right">
+			<div class="history"></div>
+			<div class="history-control">
+				<button class="button-undo-all">&laquo;</button>
+				<button class="button-undo">&lsaquo;</button>
+				<button class="button-redo">&rsaquo;</button>
+				<button class="button-redo-all">&raquo;</button>
+			</div>
+			<div class="history-control">
+				<button class="button-new-game">New Game</button>
+			</div>
+			<div class="history-control">
+				<button class="button-new-analysis">New Analysis</button>
+			</div>
+		</div>
+	</div>
+	<div id="help-wrapper">
+		<div id="help">
+			<div class="close" title="Close">&times;</div>
+			<div class="content">
+				<div>Rules</div>
+				<ul>
+					<li>Players take turn to move one of their pieces into an adjacent unoccupied square</li>
+					<li>If and only if a player has no legal moves, a pass can be made (double click any of your pieces to pass)</li>
+					<li>Move your own pieces against enemy's into a 2-to-1 battery (<span class="piece1"></span><span class="piece2"></span><span class="piece3"></span>) to capture the enemy piece</li>
+					<li>A capture can only take place with 2-to-1 battery; 3-to-1 and 2-to-2 will not result in a capture</li>
+					<li>Game ends in a draw after <span class="moves-to-draw">N</span> consecutive moves without any capture</li>
+				</ul>
+				<div>Controls</div>
+				<ul>
+					<li>Left click to choose your piece, then left click at the target square to move the chosen piece</li>
+					<li>Double click any of your pieces to pass (if and only if you have no legal moves)</li>
+					<li>Click on the evaluation score to toggle its visibility</li>
+					<li>Click on the title to toggle between light and dark themes</li>
+					<li>Hold CTRL while clicking on "New Game" to skip confirmation</li>
+					<li>Game history can be controlled by left and right arrow keys</li>
+				</ul>
+			</div>
+		</div>
+	</div>
+</body>
+</html>
