@@ -128,7 +128,7 @@
 				}
 			});
 
-			var match = window.location.search.match(/[?&]analysis=(-?\d+)(\d)/) || [];
+			var match = window.location.hash.match(/#analysis=(-?\d+)(\d)/) || [];
 			g = new Game(document.getElementById("main"), +match[1] || null, +match[2] || null);
 		});
 	</script>

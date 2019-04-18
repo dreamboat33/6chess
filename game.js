@@ -303,7 +303,7 @@ var Game = (function() {
 		this.view.$div.querySelector("button.button-redo").addEventListener("click", function() { that.redo(1); });
 		this.view.$div.querySelector("button.button-redo-all").addEventListener("click", function() { that.redo(Infinity); });
 		this.view.$div.querySelector("button.button-new-analysis").addEventListener("click", function() {
-			window.open("?analysis=" + that.board._encode() + that.currentFlip);
+			window.open("#analysis=" + that.board._encode() + that.currentFlip);
 		});
 
 		function _saveSettings() {
