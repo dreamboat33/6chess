@@ -187,7 +187,7 @@ var Game = (function() {
 		for (var j = 0; j < HEIGHT; j++) {
 			var $row = document.createElement("tr");
 			var $cell = document.createElement("td");
-			$cell.innerText = j + 1;
+			$cell.innerText = HEIGHT - j;
 			$row.appendChild($cell);
 			for (var i = 0; i < WIDTH; i++) {
 				var $cell = document.createElement("td");
@@ -236,6 +236,7 @@ var Game = (function() {
 		this.view.$evaluation.wrapper = this.view.$div.querySelector("div.evaluation");
 		this.view.$evaluation.wrapper.addEventListener("click", function() {
 			this.classList.toggle("hide");
+			that.redraw();
 			_saveSettings();
 		});
 		for (var name of ["score", "count", "table", "depth"]) {
@@ -335,10 +336,10 @@ var Game = (function() {
 		for (var i = 0; i < WIDTH * HEIGHT; i++) {
 			var id = _flip(i, this.currentFlip);
 			var $cell = this.view.$cells[i], piece = this.board.board[id];
-			$cell.classList.remove("highlight", "chosen", "p1", "p2");
-			if (piece != 0) $cell.classList.add("p" + piece);
-			if (this.chosen == id) $cell.classList.add("chosen");
-			if (this.historyIndex > 0 && (prevHistory.from == id || prevHistory.to == id)) $cell.classList.add("highlight");
+			$cell.classList[piece == P1 ? "add" : "remove"]("p1");
+			$cell.classList[piece == P2 ? "add" : "remove"]("p2");
+			$cell.classList[this.chosen == id ? "add" : "remove"]("chosen");
+			$cell.classList[this.historyIndex > 0 && (prevHistory.from == id || prevHistory.to == id) ? "add" : "remove"]("highlight");
 		}
 
 		var $events = this.view.$history.querySelectorAll("div.event");
@@ -404,9 +405,11 @@ var Game = (function() {
 		this.view.$interrupt.classList[this.evaluating ? "add" : "remove"]("busy");
 		if (this.eval != null) {
 			this.view.$evaluation.score.innerText = (
-				(Math.abs(this.eval.score) >= MATE_BASE
-					? (this.eval.score > 0 ? "M" : "-M") + ((MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1)
-					: this.eval.score / 100)
+				this.view.$evaluation.wrapper.classList.contains("hide")
+					? "??"
+					: (Math.abs(this.eval.score) >= MATE_BASE
+						? (this.eval.score > 0 ? "M" : "-M") + ((MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1)
+						: this.eval.score / 100)
 			);
 			for (var name of ["count", "table", "depth"]) {
 				this.view.$evaluation[name].innerText = this.eval[name];
