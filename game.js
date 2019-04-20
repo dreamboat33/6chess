@@ -236,7 +236,6 @@ var Game = (function() {
 		this.view.$evaluation.wrapper = this.view.$div.querySelector("div.evaluation");
 		this.view.$evaluation.wrapper.addEventListener("click", function() {
 			this.classList.toggle("hide");
-			that.redraw();
 			_saveSettings();
 		});
 		for (var name of ["score", "count", "table", "depth"]) {
@@ -405,11 +404,9 @@ var Game = (function() {
 		this.view.$interrupt.classList[this.evaluating ? "add" : "remove"]("busy");
 		if (this.eval != null) {
 			this.view.$evaluation.score.innerText = (
-				this.view.$evaluation.wrapper.classList.contains("hide")
-					? "??"
-					: (Math.abs(this.eval.score) >= MATE_BASE
-						? (this.eval.score > 0 ? "M" : "-M") + ((MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1)
-						: this.eval.score / 100)
+				(Math.abs(this.eval.score) >= MATE_BASE
+					? (this.eval.score > 0 ? "M" : "-M") + ((MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1)
+					: this.eval.score / 100)
 			);
 			for (var name of ["count", "table", "depth"]) {
 				this.view.$evaluation[name].innerText = this.eval[name];
