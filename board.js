@@ -229,7 +229,7 @@ var Board = (function() {
 			}
 			result = evalResult.value;
 			result.depth = depth;
-			if (Math.abs(result.score) >= MATE_BASE) break;
+			if (Math.abs(result.score) >= MATE_BASE && MATE_SCORE - Math.abs(result.score) <= depth) break;
 			yield result;
 		}
 		return result;
