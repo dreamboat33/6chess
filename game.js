@@ -13,6 +13,27 @@ var Game = (function() {
 		return String.fromCharCode("a".charCodeAt(0) + x) + (HEIGHT - y);
 	}
 
+	function _prettyCount(count) {
+		return count < 100000 ? count : count < 1000000 ? Math.floor(count / 100) / 10 + "K" : Math.floor(count / 100000) / 10 + "M";
+	}
+
+	function copyToClipboard(text) {
+		var e = document.createElement("textarea");
+		e.value = text;
+		e.style.position = "absolute";
+		e.style.left = "-9999px";
+		document.body.appendChild(e);
+		var selected = document.getSelection().rangeCount > 0 ? document.getSelection().getRangeAt(0) : null;
+		e.select();
+		e.setSelectionRange(0, text.length);
+		document.execCommand("copy");
+		document.body.removeChild(e);
+		if (selected) {
+			document.getSelection().removeAllRanges();
+			document.getSelection().addRange(selected);
+		}
+	}
+
 	// Game
 	function Game($div, boardCode, flip) {
 		this.view = {
@@ -31,14 +52,12 @@ var Game = (function() {
 	Game.prototype.newGame = function(boardCode, flip) {
 		this.historyMoves = [];
 		this.historyFlips = [];
-		this.historyCodes = [];
 		this.historyCapture = [];
 		this.currentFlip = flip || FLIP_NULL;
 		this.historyIndex = 0;
 
 		this.chosen = null;
 		this.board = Board.fromCode(boardCode);
-		this.historyCodes.push(this.board._encode());
 		this.startEvaluation();
 	};
 
@@ -68,8 +87,9 @@ var Game = (function() {
 		if (this.evaluating || this.control[this.board.side] == HUMAN_PLAYER_LABEL) return;
 		this._lastComputerPlay = Date.now();
 		this._computerPlayTimeoutId = null;
-		if (this.eval.move != null && !this.isFinished()) {
-			this.play(this.eval.move.from, this.eval.move.to);
+		var move = this.eval.pv == null ? null : this.eval.pv[this.eval.pv.length - 1];
+		if (move != null && !this.isFinished()) {
+			this.play(move.from, move.to);
 		}
 	};
 
@@ -115,11 +135,9 @@ var Game = (function() {
 			this.historyMoves.length = this.historyIndex;
 			this.historyFlips.length = this.historyIndex;
 			this.historyCapture.length = this.historyIndex++;
-			this.historyCodes.length = this.historyIndex;
 
 			this.historyMoves.push(matchedMove);
 			this.historyFlips.push(matchedFlip);
-			this.historyCodes.push(this.board._encode());
 			this.historyCapture.push(matchedMove.taken && matchedMove.taken.length > 0 ? 0 : (this.historyCapture[this.historyIndex - 2] || 0) + 1);
 			this.currentFlip ^= matchedFlip;
 
@@ -235,12 +253,13 @@ var Game = (function() {
 		this.view.$evaluation = {};
 		this.view.$evaluation.wrapper = this.view.$div.querySelector("div.evaluation");
 		this.view.$evaluation.wrapper.addEventListener("click", function() {
-			this.classList.toggle("hide");
+			$computerSettings.classList.toggle("hide-evaluation");
 			_saveSettings();
 		});
-		for (var name of ["score", "count", "table", "depth"]) {
+		for (var name of ["score", "count", "table", "depth", "time"]) {
 			this.view.$evaluation[name] = this.view.$evaluation.wrapper.querySelector("." + name);
 		}
+		this.view.$evaluation.pv = this.view.$div.querySelector("span.principal-variation");
 		this.view.$timeSetting = this.view.$div.querySelector("#time-setting");
 		this.view.$timeSetting.addEventListener("change", function() {
 			_saveSettings();
@@ -305,12 +324,19 @@ var Game = (function() {
 		this.view.$div.querySelector("button.button-new-analysis").addEventListener("click", function() {
 			window.open("#analysis=" + that.board._encode() + that.currentFlip);
 		});
+		this.view.$div.querySelector("button.button-copy").addEventListener("click", function() {
+			var text = "";
+			that.view.$history.querySelectorAll(".history .event:not(:first-child), .history .result.finish").forEach(function(e) {
+				text += e.innerText + "\n";
+			});
+			copyToClipboard(text);
+		});
 
 		function _saveSettings() {
 			try {
 				localStorage.setItem("gameSettings", JSON.stringify({
 					computerSettingsCollapse: $computerSettings.classList.contains("collapse"),
-					evaluationHide: that.view.$evaluation.wrapper.classList.contains("hide"),
+					evaluationHide: $computerSettings.classList.contains("hide-evaluation"),
 					timeSettingValue: that.view.$timeSetting.value,
 					depthSettingValue: that.view.$depthSetting.value,
 				}));
@@ -321,13 +347,45 @@ var Game = (function() {
 			try {
 				var settings = JSON.parse(localStorage.getItem("gameSettings"));
 				if (settings == null) return;
-				if (settings.computerSettingsCollapse) $computerSettings.classLsit.add("collapse");
-				if (settings.evaluationHide) that.view.$evaluation.wrapper.classList.add("hide");
+				if (settings.computerSettingsCollapse) $computerSettings.classList.add("collapse");
+				if (settings.evaluationHide) $computerSettings.classList.add("hide-evaluation");
 				that.view.$timeSetting.value = settings.timeSettingValue;
 				that.view.$depthSetting.value = settings.depthSettingValue;
 			} catch (e) {
 			}
 		})();
+	};
+
+	Game.prototype._nameMove = function(move) {
+		return (move.from == null
+					? "PASS"
+					: _nameIndex(_flip(move.from, this.currentFlip)) + _nameIndex(_flip(move.to, this.currentFlip)) + (move.taken.length > 0 ? "+" : ""));
+	};
+
+	Game.prototype._principalVariationString = function() {
+		if (this.eval == null || this.eval.pv == null) return "";
+		var result = "";
+		for (var move of this.eval.pv) {
+			result = this._nameMove(move) + " " + result;
+		}
+		return result.trim();
+	};
+
+	Game.prototype.redrawEvaluation = function() {
+		this.view.$status.classList[this.evaluating ? "add" : "remove"]("busy");
+		this.view.$interrupt.classList[this.evaluating ? "add" : "remove"]("busy");
+		if (this.eval != null) {
+			this.view.$evaluation.score.innerText = (
+				(Math.abs(this.eval.score) >= MATE_BASE
+					? (this.eval.score > 0 ? "M" : "-M") + ((MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1)
+					: this.eval.score / 100)
+			);
+			for (var name of ["count", "table", "depth"]) {
+				this.view.$evaluation[name].innerText = _prettyCount(this.eval[name]);
+			}
+			this.view.$evaluation.time.innerText = this.evaluationEndTime - this.evaluationStartTime;
+			this.view.$evaluation.pv.setAttribute("title", "Principal variation: " + (this.view.$evaluation.pv.innerText = this._principalVariationString()));
+		}
 	};
 
 	Game.prototype.redraw = function() {
@@ -361,11 +419,7 @@ var Game = (function() {
 			$event.classList.add("active");
 			$event.innerHTML = (
 				"<span>" + (this.historyIndex % 2 == 1 ? (this.historyIndex + 1) / 2 + ". " : "") + "</span>" +
-				"<span>" +
-					(prevHistory.from == null
-						? "PASS"
-						: _nameIndex(_flip(prevHistory.from, this.currentFlip)) + _nameIndex(_flip(prevHistory.to, this.currentFlip)) + (prevHistory.taken.length > 0 ? "+" : "")) +
-				"</span>"
+				"<span>" + this._nameMove(prevHistory) + "</span>"
 			);
 		} else {
 			this.view.$history.querySelectorAll("div.event")[0].classList.add("active");
@@ -391,7 +445,6 @@ var Game = (function() {
 			}
 			this.view.$playerControl[P1].classList.remove("turn");
 			this.view.$playerControl[P2].classList.remove("turn");
-			
 			this.view.$historyResult.classList.add("finish");
 		} else {
 			this.view.$playerControl[this.board.side].classList.remove("winner", "draw");
@@ -400,18 +453,7 @@ var Game = (function() {
 			this.view.$historyResult.classList.remove("finish");
 		}
 
-		this.view.$status.classList[this.evaluating ? "add" : "remove"]("busy");
-		this.view.$interrupt.classList[this.evaluating ? "add" : "remove"]("busy");
-		if (this.eval != null) {
-			this.view.$evaluation.score.innerText = (
-				(Math.abs(this.eval.score) >= MATE_BASE
-					? (this.eval.score > 0 ? "M" : "-M") + ((MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1)
-					: this.eval.score / 100)
-			);
-			for (var name of ["count", "table", "depth"]) {
-				this.view.$evaluation[name].innerText = this.eval[name];
-			}
-		}
+		this.redrawEvaluation();
 	};
 
 	// worker thread
@@ -419,7 +461,6 @@ var Game = (function() {
 		try {
 			if (!ENABLE_WORKER) throw new Error("ENABLE_WORKER is set to false");
 			var blob = new Blob([
-				'importScripts("' + window.location.href.substr(0, location.href.lastIndexOf("/")) + '/endgame.js");',
 				'importScripts("' + window.location.href.substr(0, location.href.lastIndexOf("/")) + '/board.js");',
 				'var timeoutId = null, boardCode = null, evalProcess = null;',
 				'function evaluate() {',
@@ -438,7 +479,7 @@ var Game = (function() {
 						'timeoutId = boardCode = evalProcess = null;',
 					'}',
 					'if (e.data.code != null) {',
-						'evalProcess = Board.fromCode(boardCode = e.data.code).evaluate(e.data.timeout, e.data.depth, e.data.repeats);',
+						'evalProcess = Board.fromCode(boardCode = e.data.code).evaluate(e.data.timeout, e.data.depth);',
 						'evaluate();',
 					'}',
 				'};'
@@ -463,17 +504,14 @@ var Game = (function() {
 		this.evaluating = true;
 		this.evaluatingCode = this.board._encode();
 		this.evaluatedPartially = false;
+		this.evaluationStartTime = Math.floor(Date.now() / 1000);
+		this.evaluationEndTime = this.evaluationStartTime;
 		var timeout = +this.view.$timeSetting.value || 500;
 		var depth = +this.view.$depthSetting.value || 4;
-		var repeats = {};
-		for (var i = this.historyIndex; i >= 0; i--) {
-			repeats[this.historyCodes[i]] = (repeats[this.historyCodes[i]] || 0) + 1;
-			if (i > 0 && this.historyCapture[i - 1] == 0) break;
-		}
 		if (this.worker) {
-			this.worker.postMessage({code: this.board._encode(), timeout: timeout, depth: depth, repeats: repeats});
+			this.worker.postMessage({code: this.board._encode(), timeout: timeout, depth: depth});
 		} else {
-			this.evalProcess = this.board.evaluate(timeout, depth, repeats);
+			this.evalProcess = this.board.evaluate(timeout, depth);
 			this.intermediateEvaluation({code: this.evaluatingCode});
 		}
 	};
@@ -484,10 +522,15 @@ var Game = (function() {
 			this.endEvaluation(evalResult.value);
 			return;
 		}
+		var evaluationEndTime = Math.floor(Date.now() / 1000);
 		if (evalResult.value != null) {
 			this.eval = evalResult.value;
 			this.evaluatedPartially = true;
-			this.redraw();
+			this.evaluationEndTime = evaluationEndTime;
+			this.redrawEvaluation();
+		} else if (evaluationEndTime != this.evaluationEndTime) {
+			this.evaluationEndTime = evaluationEndTime;
+			this.redrawEvaluation();
 		}
 		var that = this;
 		if (!this.worker) {
@@ -509,6 +552,7 @@ var Game = (function() {
 		this.evaluating = false;
 		this.evaluatingCode = null;
 		this.evaluatedPartially = false;
+		this.evaluationEndTime = Math.floor(Date.now() / 1000);
 		if (this.worker) this.worker.postMessage({});
 		else {
 			clearTimeout(this.evaluationTimeoutId);

@@ -13,13 +13,12 @@ function _flip(piece, dir) {
 	return piece;
 }
 
-var tablebase = tablebase || {};
-
 var Board = (function() {
 
-	const MAX_REPETITION = 3;
+	const MAX_REPETITION = 2;
 
-	const MAX_TABLE_SIZE = 65535;
+	const MAX_TABLE_SIZE = 50000;
+	const COLD_TABLE_SIZE = Math.floor(MAX_TABLE_SIZE * 0.7);
 	const MAX_TABLE_MATE_DEPTH = 6;
 	const MIN_SEARCH_DEPTH = 1;
 	const BASE_SEARCH_DEPTH = 4;
@@ -204,6 +203,23 @@ var Board = (function() {
 		return Board.fromCode(this._encode());
 	};
 
+	Board.prototype._degreeOfFreedom = function() {
+		var degree = 0;
+		for (var player of [P1, P2]) {
+			for (var p of this.pieces[player]) {
+				var x = p % WIDTH;
+				var y = p / WIDTH | 0;
+				for (var dir of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+					var dx = dir[0], dy = dir[1];
+					if (this._get(x + dx, y + dy) == 0) {
+						degree += player == P1 ? 1 : -1;
+					}
+				}
+			}
+		}
+		return degree;
+	};
+
 	Board.evaluationYield = function(evalProcess) {
 		var deadline = Date.now() + YIELD_INTERVAL;
 		var evalResult, intermediateResult;
@@ -214,11 +230,12 @@ var Board = (function() {
 		return intermediateResult;
 	};
 
-	Board.prototype.evaluate = function*(timeLimit, maxDepth, repeats) {
+	Board.prototype.evaluate = function*(timeLimit, maxDepth) {
 		var deadline = Date.now() + timeLimit;
 		var minDepth = maxDepth <= MIN_SEARCH_DEPTH ? MIN_SEARCH_DEPTH : maxDepth >= BASE_SEARCH_DEPTH ? BASE_SEARCH_DEPTH : maxDepth;
 		if (maxDepth < minDepth) maxDepth = minDepth;
-		var result = null;
+		var result = null, repeats = {};
+		repeats[this._encode()] = 1;
 		depthLoop: for (var depth = minDepth; depth <= maxDepth; depth++) {
 			var evalProcess = this.clone()._evaluate(0, depth, -Infinity, Infinity, repeats, depth >= MAX_TABLE_MATE_DEPTH);
 			var evalResult = evalProcess.next();
@@ -229,6 +246,7 @@ var Board = (function() {
 			}
 			result = evalResult.value;
 			result.depth = depth;
+			_resolveTablePV(result);
 			if (Math.abs(result.score) >= MATE_BASE && MATE_SCORE - Math.abs(result.score) <= depth) break;
 			yield result;
 		}
@@ -264,18 +282,12 @@ var Board = (function() {
 
 		if (useTable) {
 			var code = this._encode();
-			if (depth > 0 && tablebase[code] != null) {
-				return {
-					score: _augmentMateScore(tablebase[code], depth),
-					count: 1,
-					table: 1
-				};
-			}
-			if (depth > 0 && getTranspositionTable(code, maxDepth - depth) != null) {
+			if (getTranspositionTable(code, maxDepth - depth) != null) {
 				return {
 					score: _augmentMateScore(transpositionTable[code].score, depth),
 					count: 1,
-					table: 1
+					table: 1,
+					pv: [{code: code}]
 				};
 			}
 		}
@@ -283,17 +295,25 @@ var Board = (function() {
 		if (depth >= maxDepth) {
 			if (this.pieces[P1].length * this.pieces[P2].length == 2) { // 2vs1
 				return {
+					score: (this.pieces[P1].length - this.pieces[P2].length) * 20,
+					count: 1,
+					table: 0
+				};
+			}
+			if (this.pieces[P1].length == 2 && this.pieces[P2].length == 2) {
+				return {
 					score: 0,
 					count: 1,
 					table: 0
 				};
 			}
 			return {
-				score: (this.pieces[P1].length - this.pieces[P2].length) * 100
+				score: (this.pieces[P1].length - this.pieces[P2].length) * 90
 						+ POS_HEURISTIC[5][this.board[5]]
 						+ POS_HEURISTIC[6][this.board[6]]
 						+ POS_HEURISTIC[9][this.board[9]]
-						+ POS_HEURISTIC[10][this.board[10]],
+						+ POS_HEURISTIC[10][this.board[10]]
+						+ this._degreeOfFreedom() * 10,
 				count: 1,
 				table: 0
 			};
@@ -304,22 +324,27 @@ var Board = (function() {
 		var count = 1;
 		var table = 0;
 		var best = null;
+		var bestCode = null;
+		var pv = [];
 		for (var move of this.moves()) {
 			this.play(move);
-			repeats[this._encode()] = (repeats[this._encode()] || 0) + 1;
+			var moveCode = this._encode();
+			repeats[moveCode] = (repeats[moveCode] || 0) + 1;
 			var evalProcess = this._evaluate(depth + 1, maxDepth + (move.taken && move.taken.length > 0 && depth + 1 >= maxDepth ? 1 : 0), alpha, beta, repeats, useTable);
 			var evalResult = evalProcess.next();
 			while (!evalResult.done) {
 				yield;
 				evalResult = evalProcess.next();
 			}
-			if (--repeats[this._encode()] == 0) delete repeats[this._encode()];
+			if (--repeats[moveCode] == 0) delete repeats[moveCode];
 			this.unplay(move);
 
 			var eval = evalResult.value;
 			if (score == null || this.side == P1 && eval.score > score || this.side == P2 && eval.score < score) {
 				score = eval.score;
 				best = move;
+				bestCode = moveCode;
+				pv = eval.pv || [];
 				cutoff = eval.cutoff;
 			}
 			count += eval.count;
@@ -334,14 +359,15 @@ var Board = (function() {
 		}
 
 		if (useTable && !cutoff) {
-			putTranspositionTable(code, maxDepth - depth, _augmentMateScore(score, -depth));
+			putTranspositionTable(code, maxDepth - depth, _augmentMateScore(score, -depth), best, bestCode);
 		}
 
+		pv.push(best);
 		return {
 			score: score,
 			count: count,
 			table: table,
-			move: best,
+			pv: pv,
 			cutoff: cutoff
 		};
 	};
@@ -351,56 +377,54 @@ var Board = (function() {
 	var transpositionTableSize = 0;
 
 	function clearTranspositionTable() {
-		transpositionTable = {};
-		transpositionTableSize = 0;
+		var entries = Object.entries(transpositionTable);
+		entries.sort(function(a, b) {
+			return (a[1].depth - a[1].stale * 2) - (b[1].depth - b[1].stale * 2);
+		});
+		for (var i = 0; i < entries.length; i++) {
+			var entry = entries[i];
+			if (i < COLD_TABLE_SIZE) {
+				delete transpositionTable[entry[0]];
+			} else {
+				transpositionTable[entry[0]].stale++;
+			}
+		}
+		transpositionTableSize -= COLD_TABLE_SIZE;
 	}
 
 	function getTranspositionTable(code, depth) {
 		return transpositionTable[code] && transpositionTable[code].depth >= depth ? transpositionTable[code].score : null;
 	}
 
-	function putTranspositionTable(code, depth, score) {
+	function putTranspositionTable(code, depth, score, move, moveCode) {
 		if (Math.abs(score) >= MATE_BASE && MATE_SCORE - Math.abs(score) >= MAX_TABLE_MATE_DEPTH || getTranspositionTable(code, depth) != null) return;
-		if (transpositionTable[code] == null) { // TODO more sophisticated eviction policy?
+		if (transpositionTable[code] == null) {
 			if (transpositionTableSize >= MAX_TABLE_SIZE) clearTranspositionTable();
 			transpositionTableSize++;
 		}
 		transpositionTable[code] = {
 			score: score,
-			depth: depth
+			depth: depth,
+			move: move,
+			moveCode: moveCode,
+			stale: 0
 		};
 	}
 
-	// 2vs1 endgame tablebase
-	(function generateTablebase() {
-		if (Object.keys(tablebase).length > 0) return;
-		console.warn("tablebase not found: maybe missing endgame.js?");
-		console.info("generating tablebase on the fly");
-		const n = WIDTH * HEIGHT;
-		var a = new Array(n).fill(0), tb = {};
-		for (var i = 0; i < n - 2; i++)
-		for (var j = i + 1; j < n - 1; j++)
-		for (var k = j + 1; k < n; k++)
-		for (var c = 0; c < 3; c++)
-		for (var o = 0; o < 2; o++)
-		for (var p of [P1, P2]) {
-			if (o) {
-				a[i] = c == 0 ? P1 : P2;
-				a[j] = c == 1 ? P1 : P2;
-				a[k] = c == 2 ? P1 : P2;
-			} else {
-				a[i] = c == 0 ? P2 : P1;
-				a[j] = c == 1 ? P2 : P1;
-				a[k] = c == 2 ? P2 : P1;
-			}
-			var b = new Board(a, p);
-			var score = b._evaluate(0, 10, -Infinity, Infinity, Infinity).score;
-			if (Math.abs(score) >= MATE_BASE) tb[b._encode()] = score;
-			a[i] = a[j] = a[k] = 0;
+	function _resolveTablePV(result) {
+		if (result.pv == null || result.pv.length == 0 || !result.pv[0].code) return;
+
+		var code = result.pv[0].code;
+		var depth = (transpositionTable[code] || {}).depth;
+
+		var moves = [];
+		while (transpositionTable[code] && depth-- > 0) {
+			moves.push(transpositionTable[code].move);
+			code = transpositionTable[code].moveCode;
 		}
-		clearTranspositionTable();
-		tablebase = tb;
-	})();
+
+		result.pv = moves.reverse().concat(result.pv.slice(1));
+	}
 
 	return Board;
 
