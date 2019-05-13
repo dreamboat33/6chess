@@ -230,6 +230,26 @@ var Board = (function() {
 		return intermediateResult;
 	};
 
+	Board.prototype._demoteLoopingPV = function(result) {
+		if (result.pv == null || result.pv.length == 0) return;
+		var i = result.pv.length - 1, repeats = {};
+		repeats[this._encode()] = 1;
+		while (i >= 0) {
+			this.play(result.pv[i--]);
+			if (repeats[this._encode()]) {
+				if (transpositionTable[this._encode()]) {
+					transpositionTable[this._encode()].score = 0;
+				}
+				break;
+			} else {
+				repeats[this._encode()] = 1;
+			}
+		}
+		while (++i < result.pv.length) {
+			this.unplay(result.pv[i]);
+		}
+	};
+
 	Board.prototype.evaluate = function*(timeLimit, maxDepth) {
 		var deadline = Date.now() + timeLimit;
 		var minDepth = maxDepth <= MIN_SEARCH_DEPTH ? MIN_SEARCH_DEPTH : maxDepth >= BASE_SEARCH_DEPTH ? BASE_SEARCH_DEPTH : maxDepth;
@@ -247,6 +267,7 @@ var Board = (function() {
 			result = evalResult.value;
 			result.depth = depth;
 			_resolveTablePV(result);
+			this._demoteLoopingPV(result);
 			if (Math.abs(result.score) >= MATE_BASE && MATE_SCORE - Math.abs(result.score) <= depth) break;
 			yield result;
 		}
