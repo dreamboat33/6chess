@@ -1,5 +1,8 @@
 # 6chess
 
+### 1.1.1
+* evaluation change for repetition
+
 ### 1.1.0
 * responsive layout
 * evaluation change
