@@ -1,4 +1,12 @@
-# 6chess
+# Sixy Chess
+
+### 2.0.0
+
+* rename to "Sixy Chess"
+* add game variant of different board sizes
+* implement zobrist hashing
+* other evaluation-related changes
+* UI update
 
 ### 1.1.1
 * evaluation change for repetition

@@ -1,17 +1,15 @@
-const MOVES_TO_DRAW = 50;
+const Game = (function() {
 
-var Game = (function() {
+	const MOVES_TO_DRAW = 50;
 
 	const MIN_COMPUTER_PLAY_DELAY = 100;
 	const ENABLE_WORKER = true;
 
 	const HUMAN_PLAYER_LABEL = "HUMAN";
+	const COMPUTER_PLAYER_LABEL = "COMPUTER";
 
-	function _nameIndex(index) {
-		var x = index % WIDTH;
-		var y = index / WIDTH | 0;
-		return String.fromCharCode("a".charCodeAt(0) + x) + (HEIGHT - y);
-	}
+	const SCORE_ADVANTAGE_THRESHOLD = 70;
+	const SCORE_WINNING_THRESHOLD = 170;
 
 	function _prettyCount(count) {
 		return count < 100000 ? count : count < 1000000 ? Math.floor(count / 100) / 10 + "K" : Math.floor(count / 100000) / 10 + "M";
@@ -43,26 +41,59 @@ var Game = (function() {
 
 		this.control = [];
 		this.initWorker();
+		this.initTranspositionTableMaxSize();
 		this.firstDraw();
-		this.newGame(boardCode, flip);
-		this.resetHumanPlayers();
+		if (boardCode == null) {
+			this.newGame(new Board(this.view.$gameVariantSelect.value), flip);
+		} else {
+			this.newGame(Board.fromCode(boardCode), flip);
+			this.view.$gameVariantSelect.value = this.board.variant;
+		}
+		this.view.$table.dataset.width = this.board.width;
+		this.setPlayerControl(HUMAN_PLAYER_LABEL, COMPUTER_PLAYER_LABEL);
 		this.redraw();
 	}
 
-	Game.prototype.newGame = function(boardCode, flip) {
+	Game.prototype.newGame = function(board, flip) {
 		this.historyMoves = [];
 		this.historyFlips = [];
 		this.historyCapture = [];
-		this.currentFlip = flip || FLIP_NULL;
+		this.currentFlip = flip || Board.CONST.FLIP_NULL;
 		this.historyIndex = 0;
 
 		this.chosen = null;
-		this.board = Board.fromCode(boardCode);
+		this.board = board;
+		this.resetTranspositionTable();
+		this.resizeBoard();
 		this.startEvaluation();
 	};
 
+	Game.prototype.resetTranspositionTable = function() {
+		if (this.worker) {
+			this.worker.postMessage({action: "RESET_TABLE"});
+		} else {
+			Board.resetTranspositionTable();
+		}
+	};
+
+	Game.prototype.initTranspositionTableMaxSize = function() {
+		var match = window.location.hash.match(/#tableSize=([^#&]+)/);
+		if (match) {
+			this.setTranspositionTableMaxSize(+match[1]);
+		}
+	};
+
+	Game.prototype.setTranspositionTableMaxSize = function(size) {
+		console.log("Set transposition table max size to " + size);
+		if (this.worker) {
+			this.worker.postMessage({action: "SET_TABLE_MAX_SIZE", value: size});
+		} else {
+			Board.setTranspositionTableMaxSize(size);
+		}
+	};
+
 	Game.prototype.isFinished = function() {
-		return this.board.pieces[P1].length == 0 || this.board.pieces[P2].length == 0
+		return this.board.pieces[Board.CONST.P1].length == 0 || this.board.pieces[Board.CONST.P2].length == 0
 			|| (this.historyCapture[this.historyIndex - 1] || 0) >= MOVES_TO_DRAW * 2;
 	};
 
@@ -98,16 +129,16 @@ var Game = (function() {
 		var moves = this.board.moves();
 		var matchedMove = null, matchedFlip = null;
 		if (from == to) {
-			if (moves.length == 1 && moves[0].from == null) {
+			if (moves.length == 1 && Board.isPassMove(moves[0])) {
 				matchedMove = moves[0];
 			}
 		} else {
 			nodeLoop: {
 				this.board._checkFlip();
-				for (var dir of [FLIP_NULL, FLIP_H, FLIP_V]) {
+				for (var dir of [Board.CONST.FLIP_NULL, Board.CONST.FLIP_H, Board.CONST.FLIP_V]) {
 					if (!this.board.flip[dir]) continue;
-					var flippedFrom = _flip(from, dir);
-					var flippedTo = _flip(to, dir);
+					var flippedFrom = this.board._flipPiece(from, dir);
+					var flippedTo = this.board._flipPiece(to, dir);
 					for (var move of moves) {
 						if (move.from == flippedFrom && move.to == flippedTo) {
 							matchedMove = move;
@@ -116,13 +147,13 @@ var Game = (function() {
 						}
 					}
 				}
-				if (this.board.flip[FLIP_H] && this.board.flip[FLIP_V]) {
-					var flippedFrom = _flip(from, FLIP_H | FLIP_V);
-					var flippedTo = _flip(to, FLIP_H | FLIP_V);
+				if (this.board.flip[Board.CONST.FLIP_H] && this.board.flip[Board.CONST.FLIP_V]) {
+					var flippedFrom = this.board._flipPiece(from, Board.CONST.FLIP_H | Board.CONST.FLIP_V);
+					var flippedTo = this.board._flipPiece(to, Board.CONST.FLIP_H | Board.CONST.FLIP_V);
 					for (var move of moves) {
 						if (move.from == flippedFrom && move.to == flippedTo) {
 							matchedMove = child;
-							matchedFlip = FLIP_H | FLIP_V;
+							matchedFlip = Board.CONST.FLIP_H | Board.CONST.FLIP_V;
 							break nodeLoop;
 						}
 					}
@@ -154,7 +185,7 @@ var Game = (function() {
 			this.currentFlip ^= this.historyFlips[this.historyIndex];
 			if (this.historyIndex <= 0) break;
 		}
-		this.resetHumanPlayers();
+		this.setPlayerControl(HUMAN_PLAYER_LABEL, HUMAN_PLAYER_LABEL);
 		this.startEvaluation();
 		this.chosen = null;
 		this.redraw();
@@ -167,25 +198,55 @@ var Game = (function() {
 			this.currentFlip ^= this.historyFlips[this.historyIndex++];
 			if (this.historyIndex >= this.historyMoves.length) break;
 		}
-		this.resetHumanPlayers();
+		this.setPlayerControl(HUMAN_PLAYER_LABEL, HUMAN_PLAYER_LABEL);
 		this.startEvaluation();
 		this.chosen = null;
 		this.redraw();
 	};
 
-	Game.prototype.resetHumanPlayers = function() {
-		this.control[P1] = this.control[P2] = HUMAN_PLAYER_LABEL;
-		this.view.$playerControl[P1].classList.add("human");
-		this.view.$playerControl[P2].classList.add("human");
+	Game.prototype.setPlayerControl = function(control1, control2) {
+		this.control[Board.CONST.P1] = control1;
+		this.control[Board.CONST.P2] = control2;
+		this.view.$playerControl[Board.CONST.P1].classList[control1 == HUMAN_PLAYER_LABEL ? "add" : "remove"]("human");
+		this.view.$playerControl[Board.CONST.P2].classList[control2 == HUMAN_PLAYER_LABEL ? "add" : "remove"]("human");
 	};
 
 	Game.prototype.choose = function(id) {
-		if (this.chosen != null) this.view.$cells[_flip(this.chosen, this.currentFlip)].classList.remove("chosen");
+		if (this.chosen != null) this.view.$cells[this.board._flipPiece(this.chosen, this.currentFlip)].classList.remove("chosen");
 		this.chosen = id;
-		if (this.chosen != null) this.view.$cells[_flip(this.chosen, this.currentFlip)].classList.add("chosen");
+		if (this.chosen != null) this.view.$cells[this.board._flipPiece(this.chosen, this.currentFlip)].classList.add("chosen");
 	};
 
 	// Game UI
+	Game.prototype.resizeBoard = function() {
+		var $table = this.view.$table;
+		while ($table.firstChild) {
+			$table.removeChild($table.firstChild);
+		}
+		this.view.$cells = [];
+		for (var j = 0; j < this.board.height; j++) {
+			var $row = document.createElement("tr");
+			var $cell = document.createElement("td");
+			$cell.innerText = this.board.height - j;
+			$row.appendChild($cell);
+			for (var i = 0; i < this.board.width; i++) {
+				var $cell = document.createElement("td");
+				$cell.dataset.id = j * this.board.width + i;
+				$row.appendChild($cell);
+				this.view.$cells.push($cell);
+			}
+			$table.appendChild($row);
+		}
+		var $row = document.createElement("tr");
+		$row.appendChild(document.createElement("td"));
+		for (var i = 0; i < this.board.width; i++) {
+			var $cell = document.createElement("td");
+			$cell.innerText = String.fromCharCode("a".charCodeAt(0) + i);
+			$row.appendChild($cell);
+		}
+		$table.appendChild($row);
+	};
+
 	Game.prototype.firstDraw = function() {
 		var that = this;
 		window.addEventListener("keydown", function(e) {
@@ -201,39 +262,18 @@ var Game = (function() {
 			}
 		});
 
-		var $table = this.view.$div.querySelector("table");
-		for (var j = 0; j < HEIGHT; j++) {
-			var $row = document.createElement("tr");
-			var $cell = document.createElement("td");
-			$cell.innerText = HEIGHT - j;
-			$row.appendChild($cell);
-			for (var i = 0; i < WIDTH; i++) {
-				var $cell = document.createElement("td");
-				$cell.dataset.id = j * WIDTH + i;
-				$row.appendChild($cell);
-				this.view.$cells.push($cell);
-			}
-			$table.appendChild($row);
-		}
-		var $row = document.createElement("tr");
-		$row.appendChild(document.createElement("td"));
-		for (var i = 0; i < WIDTH; i++) {
-			var $cell = document.createElement("td");
-			$cell.innerText = String.fromCharCode("a".charCodeAt(0) + i);
-			$row.appendChild($cell);
-		}
-		$table.appendChild($row);
-		$table.addEventListener("click", function(e) {
+		this.view.$table = this.view.$div.querySelector("table");
+		this.view.$table.addEventListener("click", function(e) {
 			if (!e.target.matches("td")) return;
 			if (that.isFinished() || that.control[that.board.side] != HUMAN_PLAYER_LABEL) return;
 			var id = +e.target.dataset.id;
-			id = _flip(id, that.currentFlip);
+			id = that.board._flipPiece(id, that.currentFlip);
 			if (that.chosen == null) {
 				if (that.board.board[id] == that.board.side) that.choose(id);
 			} else {
 				if (that.chosen == id) that.play(id, id); // attempt a pass
 				else if (that.board.board[id] == that.board.side) that.choose(id);
-				else if (that.board.board[id] == _opponent(that.board.side)) that.choose(null);
+				else if (that.board.board[id] == Board.opponentOf(that.board.side)) that.choose(null);
 				else that.play(that.chosen, id);
 			}
 		});
@@ -260,6 +300,9 @@ var Game = (function() {
 			this.view.$evaluation[name] = this.view.$evaluation.wrapper.querySelector("." + name);
 		}
 		this.view.$evaluation.pv = this.view.$div.querySelector("span.principal-variation");
+		this.view.$evaluation.pv.addEventListener("click", function() {
+			window.open("#analysis=" + that.currentFlip + that.board.toCode() + "&#pv=" + that._encodePv());
+		});
 		this.view.$timeSetting = this.view.$div.querySelector("#time-setting");
 		this.view.$timeSetting.addEventListener("change", function() {
 			_saveSettings();
@@ -282,10 +325,10 @@ var Game = (function() {
 			that.control[$playerControl.dataset.player] = e.target.dataset.value;
 			that.scheduleComputerPlay();
 		});
-		this.view.$playerControl[P1] = this.view.$playerControl.wrapper.querySelectorAll("div.player-control")[0];
-		this.view.$playerControl[P1].dataset.player = P1;
-		this.view.$playerControl[P2] = this.view.$playerControl.wrapper.querySelectorAll("div.player-control")[1];
-		this.view.$playerControl[P2].dataset.player = P2;
+		this.view.$playerControl[Board.CONST.P1] = this.view.$playerControl.wrapper.querySelectorAll("div.player-control")[0];
+		this.view.$playerControl[Board.CONST.P1].dataset.player = Board.CONST.P1;
+		this.view.$playerControl[Board.CONST.P2] = this.view.$playerControl.wrapper.querySelectorAll("div.player-control")[1];
+		this.view.$playerControl[Board.CONST.P2].dataset.player = Board.CONST.P2;
 
 		this.view.$playerControl.wrapper.querySelectorAll("div.handshake").forEach(function(e) {
 			e.setAttribute("title", "Draw (" + MOVES_TO_DRAW + "-move rule)");
@@ -311,9 +354,23 @@ var Game = (function() {
 		this.view.$history.appendChild($historyStart);
 		this.view.$history.appendChild(this.view.$historyResult);
 
+		this.view.$gameVariantSelect = this.view.$div.querySelector("select.game-variant");
+		for (var key in Board.CONST.VARIANTS) {
+			var $option = document.createElement("option");
+			$option.value = key;
+			$option.innerText = Board.CONST.VARIANTS[key];
+			this.view.$gameVariantSelect.appendChild($option);
+		}
+		this.view.$gameVariantSelect.addEventListener("change", function(e) {
+			_saveSettings();
+			that.newGame(new Board(this.value));
+			that.view.$table.dataset.width = that.board.width;
+			that.redraw();
+		});
+
 		this.view.$div.querySelector("button.button-new-game").addEventListener("click", function(e) {
 			if (e.ctrlKey || confirm("New game?")) {
-				that.newGame();
+				that.newGame(new Board(that.view.$gameVariantSelect.value));
 				that.redraw();
 			}
 		});
@@ -322,7 +379,7 @@ var Game = (function() {
 		this.view.$div.querySelector("button.button-redo").addEventListener("click", function() { that.redo(1); });
 		this.view.$div.querySelector("button.button-redo-all").addEventListener("click", function() { that.redo(Infinity); });
 		this.view.$div.querySelector("button.button-new-analysis").addEventListener("click", function() {
-			window.open("#analysis=" + that.board._encode() + that.currentFlip);
+			window.open("#analysis=" + that.currentFlip + that.board.toCode());
 		});
 		this.view.$div.querySelector("button.button-copy").addEventListener("click", function() {
 			var text = "";
@@ -339,6 +396,7 @@ var Game = (function() {
 					evaluationHide: $computerSettings.classList.contains("hide-evaluation"),
 					timeSettingValue: that.view.$timeSetting.value,
 					depthSettingValue: that.view.$depthSetting.value,
+					gameVariantValue: that.view.$gameVariantSelect.value
 				}));
 			} catch (e) {
 			}
@@ -351,15 +409,22 @@ var Game = (function() {
 				if (settings.evaluationHide) $computerSettings.classList.add("hide-evaluation");
 				that.view.$timeSetting.value = settings.timeSettingValue;
 				that.view.$depthSetting.value = settings.depthSettingValue;
+				if ("gameVariantValue" in settings) that.view.$gameVariantSelect.value = settings.gameVariantValue;
 			} catch (e) {
 			}
 		})();
 	};
 
+	Game.prototype._nameIndex = function(index) {
+		var x = index % this.board.width;
+		var y = index / this.board.width | 0;
+		return String.fromCharCode("a".charCodeAt(0) + x) + (this.board.height - y);
+	};
+
 	Game.prototype._nameMove = function(move) {
-		return (move.from == null
+		return (Board.isPassMove(move)
 					? "PASS"
-					: _nameIndex(_flip(move.from, this.currentFlip)) + _nameIndex(_flip(move.to, this.currentFlip)) + (move.taken.length > 0 ? "+" : ""));
+					: this._nameIndex(this.board._flipPiece(move.from, this.currentFlip)) + this._nameIndex(this.board._flipPiece(move.to, this.currentFlip)) + (move.taken.length > 0 ? "+" : ""));
 	};
 
 	Game.prototype._principalVariationString = function() {
@@ -371,18 +436,63 @@ var Game = (function() {
 		return result.trim();
 	};
 
+	Game.prototype._encodePv = function() {
+		var board = this.board.clone();
+		var code = [];
+		for (var p = this.eval.pv.length - 1; p >= 0; p--) {
+			var moves = board.moves().sort((m, n) => { return m.from - n.from || m.to - n.to; });
+			for (var i = 0; i < moves.length; i++) {
+				if (Board.isSameMove(this.eval.pv[p], moves[i])) {
+					board.play(moves[i]);
+					code.push(i);
+					break;
+				}
+			}
+		}
+		return code.join(",");
+	};
+
+	Game.prototype._decodePvAndPlay = function(pv) {
+		if (pv == null) return;
+		for (var i of pv.split(",")) {
+			var move = this.board.moves().sort((m, n) => { return m.from - n.from || m.to - n.to; })[i];
+			if (move == null) break;
+			this.play(move.from, move.to);
+		}
+		this.undo(Infinity);
+	};
+
 	Game.prototype.redrawEvaluation = function() {
 		this.view.$status.classList[this.evaluating ? "add" : "remove"]("busy");
 		this.view.$interrupt.classList[this.evaluating ? "add" : "remove"]("busy");
 		if (this.eval != null) {
+			var mateIn = (Board.CONST.MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1;
 			this.view.$evaluation.score.innerText = (
-				(Math.abs(this.eval.score) >= MATE_BASE
-					? (this.eval.score > 0 ? "M" : "-M") + ((MATE_SCORE - Math.abs(this.eval.score) + 1) >> 1)
-					: this.eval.score / 100)
+				(Math.abs(this.eval.score) >= Board.CONST.MATE_BASE
+					? (this.eval.score > 0 ? "M" : "-M") + mateIn
+					: (this.eval.score / 100).toFixed(1).replace(/^-(0(?:\.0+)?)$/, "$1"))
 			);
-			for (var name of ["count", "table", "depth"]) {
+			this.view.$evaluation.score.title = (
+				Math.abs(this.eval.score) < SCORE_ADVANTAGE_THRESHOLD
+					? "Drawish"
+					: (this.eval.score > 0 ? "White " : "Black ") + (
+						Math.abs(this.eval.score) == Board.CONST.MATE_SCORE
+							? "wins"
+							: (Math.abs(this.eval.score) < SCORE_WINNING_THRESHOLD
+								? "has an advantage"
+								: ("is winning" + (
+									Math.abs(this.eval.score) >= Board.CONST.MATE_BASE
+										? " in " + mateIn + " move" + (mateIn == 1 ? "" : "s")
+										: ""
+								)
+							)
+						)
+					)
+			);
+			for (var name of ["count", "table"]) {
 				this.view.$evaluation[name].innerText = _prettyCount(this.eval[name]);
 			}
+			this.view.$evaluation.depth.innerText = this.eval.depth + "/" + (this.eval.pv ? this.eval.pv.length : "-");
 			this.view.$evaluation.time.innerText = this.evaluationEndTime - this.evaluationStartTime;
 			this.view.$evaluation.pv.setAttribute("title", "Principal variation: " + (this.view.$evaluation.pv.innerText = this._principalVariationString()));
 		}
@@ -390,11 +500,11 @@ var Game = (function() {
 
 	Game.prototype.redraw = function() {
 		var prevHistory = this.historyIndex > 0 ? this.historyMoves[this.historyIndex - 1] : null;
-		for (var i = 0; i < WIDTH * HEIGHT; i++) {
-			var id = _flip(i, this.currentFlip);
+		for (var i = 0; i < this.board.width * this.board.height; i++) {
+			var id = this.board._flipPiece(i, this.currentFlip);
 			var $cell = this.view.$cells[i], piece = this.board.board[id];
-			$cell.classList[piece == P1 ? "add" : "remove"]("p1");
-			$cell.classList[piece == P2 ? "add" : "remove"]("p2");
+			$cell.classList[piece == Board.CONST.P1 ? "add" : "remove"]("p1");
+			$cell.classList[piece == Board.CONST.P2 ? "add" : "remove"]("p2");
 			$cell.classList[this.chosen == id ? "add" : "remove"]("chosen");
 			$cell.classList[this.historyIndex > 0 && (prevHistory.from == id || prevHistory.to == id) ? "add" : "remove"]("highlight");
 		}
@@ -428,28 +538,28 @@ var Game = (function() {
 		this.view.$history.scrollTop = $eventActive.offsetTop - this.view.$history.clientHeight / 2;
 
 		if (this.isFinished()) {
-			if (this.board.pieces[P1].length != 0 && this.board.pieces[P2].length == 0) {
-				this.view.$playerControl[P1].classList.add("winner");
-				this.view.$playerControl[P1].classList.remove("draw");
+			if (this.board.pieces[Board.CONST.P1].length != 0 && this.board.pieces[Board.CONST.P2].length == 0) {
+				this.view.$playerControl[Board.CONST.P1].classList.add("winner");
+				this.view.$playerControl[Board.CONST.P1].classList.remove("draw");
 				this.view.$historyResult.innerText = "1-0";
-			} else if (this.board.pieces[P2].length != 0 && this.board.pieces[P1].length == 0) {
-				this.view.$playerControl[P2].classList.add("winner");
-				this.view.$playerControl[P2].classList.remove("draw");
+			} else if (this.board.pieces[Board.CONST.P2].length != 0 && this.board.pieces[Board.CONST.P1].length == 0) {
+				this.view.$playerControl[Board.CONST.P2].classList.add("winner");
+				this.view.$playerControl[Board.CONST.P2].classList.remove("draw");
 				this.view.$historyResult.innerText = "0-1";
 			} else {
-				this.view.$playerControl[P1].classList.add("draw");
-				this.view.$playerControl[P1].classList.remove("winner");
-				this.view.$playerControl[P2].classList.add("draw");
-				this.view.$playerControl[P2].classList.remove("winner");
+				this.view.$playerControl[Board.CONST.P1].classList.add("draw");
+				this.view.$playerControl[Board.CONST.P1].classList.remove("winner");
+				this.view.$playerControl[Board.CONST.P2].classList.add("draw");
+				this.view.$playerControl[Board.CONST.P2].classList.remove("winner");
 				this.view.$historyResult.innerText = "\u00bd-\u00bd";
 			}
-			this.view.$playerControl[P1].classList.remove("turn");
-			this.view.$playerControl[P2].classList.remove("turn");
+			this.view.$playerControl[Board.CONST.P1].classList.remove("turn");
+			this.view.$playerControl[Board.CONST.P2].classList.remove("turn");
 			this.view.$historyResult.classList.add("finish");
 		} else {
 			this.view.$playerControl[this.board.side].classList.remove("winner", "draw");
 			this.view.$playerControl[this.board.side].classList.add("turn");
-			this.view.$playerControl[_opponent(this.board.side)].classList.remove("winner", "draw", "turn");
+			this.view.$playerControl[Board.opponentOf(this.board.side)].classList.remove("winner", "draw", "turn");
 			this.view.$historyResult.classList.remove("finish");
 		}
 
@@ -462,6 +572,7 @@ var Game = (function() {
 			if (!ENABLE_WORKER) throw new Error("ENABLE_WORKER is set to false");
 			var blob = new Blob([
 				'importScripts("' + window.location.href.substr(0, location.href.lastIndexOf("/")) + '/board.js");',
+				'importScripts("' + window.location.href.substr(0, location.href.lastIndexOf("/")) + '/zobrist.js");',
 				'var timeoutId = null, boardCode = null, evalProcess = null;',
 				'function evaluate() {',
 					'var evalResult = Board.evaluationYield(evalProcess);',
@@ -474,13 +585,21 @@ var Game = (function() {
 					'}',
 				'}',
 				'onmessage = function(e) {',
-					'if (timeoutId != null) {',
-						'clearTimeout(timeoutId);',
-						'timeoutId = boardCode = evalProcess = null;',
-					'}',
-					'if (e.data.code != null) {',
-						'evalProcess = Board.fromCode(boardCode = e.data.code).evaluate(e.data.timeout, e.data.depth);',
-						'evaluate();',
+					'if (e.data.action === "RESET_TABLE") {',
+						'Board.resetTranspositionTable();',
+					'} else if (e.data.action === "SET_TABLE_MAX_SIZE") {',
+						'Board.setTranspositionTableMaxSize(e.data.value);',
+					'} else if (e.data.action === "EVALUATE") {',
+						'if (timeoutId != null) {',
+							'clearTimeout(timeoutId);',
+							'timeoutId = boardCode = evalProcess = null;',
+						'}',
+						'if (e.data.code != null) {',
+							'evalProcess = Board.fromCode(boardCode = e.data.code).evaluate(e.data.timeout, e.data.depth);',
+							'evaluate();',
+						'}',
+					'} else {',
+						'console.error("Unknown action: " + e.data.action)',
 					'}',
 				'};'
 			], {type: 'text/javascript'});
@@ -502,14 +621,14 @@ var Game = (function() {
 	Game.prototype.startEvaluation = function() {
 		this.unscheduleComputerPlay();
 		this.evaluating = true;
-		this.evaluatingCode = this.board._encode();
+		this.evaluatingCode = this.board.toCode();
 		this.evaluatedPartially = false;
 		this.evaluationStartTime = Math.floor(Date.now() / 1000);
 		this.evaluationEndTime = this.evaluationStartTime;
 		var timeout = +this.view.$timeSetting.value || 500;
 		var depth = +this.view.$depthSetting.value || 4;
 		if (this.worker) {
-			this.worker.postMessage({code: this.board._encode(), timeout: timeout, depth: depth});
+			this.worker.postMessage({action: "EVALUATE", code: this.board.toCode(), timeout: timeout, depth: depth});
 		} else {
 			this.evalProcess = this.board.evaluate(timeout, depth);
 			this.intermediateEvaluation({code: this.evaluatingCode});
@@ -553,7 +672,7 @@ var Game = (function() {
 		this.evaluatingCode = null;
 		this.evaluatedPartially = false;
 		this.evaluationEndTime = Math.floor(Date.now() / 1000);
-		if (this.worker) this.worker.postMessage({});
+		if (this.worker) this.worker.postMessage({action: "EVALUATE"});
 		else {
 			clearTimeout(this.evaluationTimeoutId);
 			this.evaluationTimeoutId = null;
@@ -562,6 +681,10 @@ var Game = (function() {
 		if (eval) this.eval = eval;
 		this.scheduleComputerPlay();
 		this.redraw();
+	};
+
+	Game.CONST = {
+		MOVES_TO_DRAW: MOVES_TO_DRAW
 	};
 
 	return Game;

@@ -4,7 +4,7 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<link id="favicon" rel="shortcut icon" href="img/icon.png">
-	<title>6-6 chess</title>
+	<title>Sixy chess</title>
 	<style type="text/css">
 		#title { cursor:pointer; margin:20px 70px 10px; }
 		#title .info { cursor:help; }
@@ -14,14 +14,15 @@
 		#main .left .wrapper { padding:8px; border:1px dotted grey; }
 
 		#main table { border-collapse:collapse; margin-left:-18px }
-		#main tr:last-child td { border:0; padding:2px; height:20px; }
-		#main td:first-child { border:0; padding:2px; width:15px; }
-		#main td { width:50px; height:50px; border:1px solid black; padding:5px; text-align:center; }
-		#main td.highlight { background:#ccc; }
-		#main td.chosen { background:yellow; }
-		#main td:after { width:100%; height:100%; border-radius:50%; border:1px solid black; box-sizing:border-box; }
-		#main td.p1:after { content:''; display:block; background:white; }
-		#main td.p2:after { content:''; display:block; background:black; border-color:white; }
+		#main table td { width:50px; height:50px; border:1px solid black; padding:5px; text-align:center; }
+		#main table[data-width="5"] td { width:40px; height:40px; padding:4px; }
+		#main table tr:last-child td { border:0; padding:2px; height:20px; }
+		#main table td:first-child { border:0; padding:2px; width:15px; }
+		#main table td.highlight { background:#ccc; }
+		#main table td.chosen { background:yellow; }
+		#main table td:after { width:100%; height:100%; border-radius:50%; border:1px solid black; box-sizing:border-box; }
+		#main table td.p1:after { content:''; display:block; background:white; }
+		#main table td.p2:after { content:''; display:block; background:black; border-color:white; }
 
 		#main .history { display:block; position:relative; width:110px; height:245px; border:1px solid black; overflow:auto; cursor:default; }
 		#main .history > div { margin:2px; }
@@ -33,22 +34,27 @@
 
 		#main .history-control-wrapper { margin-top:3px; }
 		#main .history-control { text-align:center; }
-		#main .history-control button { margin:2px 0; width:25px; padding:3px 0; }
+		#main .history-control button,
+		#main .history-control select { margin:2px 0; width:25px; padding:3px 0; text-align-last:center; }
 		#main .history-control button.button-new-game,
 		#main .history-control button.button-new-analysis,
-		#main .history-control button.button-copy { width:100px; }
+		#main .history-control button.button-copy,
+		#main .history-control select { width:100px; }
 
-		#main .player-control > * { vertical-align:middle; display:inline-block; }
-		#main .player-control { position:relative; text-align:center; }
-		#main .player-control.winner .trophy { display:block; position:absolute; left:0; top:0; bottom:0; margin:auto 0; }
-		#main .player-control.draw .handshake { display:block; position:absolute; left:-5px; top:0; bottom:0; margin:auto 0; }
+		#main .player-control-wrapper:after { content:''; display:block; clear:both; }
+		#main .player-control { position:relative; text-align:center; width:50%; float:left; box-sizing:border-box; padding:1px; }
+		#main .player-control.winner .trophy { display:block; position:absolute; top:0; bottom:0; margin:auto 0; }
+		#main .player-control.winner[data-player="1"] .trophy { left:0; }
+		#main .player-control.winner[data-player="2"] .trophy { right:0; }
+		#main .player-control.draw .handshake { display:block; position:absolute; right:-20px; top:0; bottom:0; margin:auto 0; }
 		#main .player-control .trophy { width:30px; height:30px; background:url('img/trophy.png') center/contain no-repeat; display:none; }
 		#main .player-control .handshake { width:40px; height:30px; background:url('img/handshake.png') center/contain no-repeat; display:none; }
-		#main .player-control span { width:70px; }
+		#main .player-control span { display:block; margin:2px; }
+		#main .player-control.turn { background:#ccc; }
 		#main .player-control.turn span { font-weight:bold; }
 		#main .player-control.human .player.human { opacity:1; }
 		#main .player-control.human .player.computer { opacity:0.4; }
-		#main .player { width:40px; height:30px; border:2px solid green; border-radius:50%; margin:2px; }
+		#main .player { width:40px; height:30px; border:2px solid green; border-radius:50%; margin:2px auto; }
 		#main .player.human { background:#ccc url('img/human.png') center/contain no-repeat; opacity:0.4; }
 		#main .player.computer { background:#ccc url('img/computer.png') center/contain no-repeat; opacity:1; }
 
@@ -97,6 +103,8 @@
 		.dark #main .history > div.active { background:blue; }
 		.dark #main .history > .result.finish { background:grey; }
 
+		.dark #main .player-control.turn { background:#444; }
+
 		.dark #help { background:black; }
 
 		@media screen and (max-width:420px) {
@@ -111,6 +119,7 @@
 		}
 	</style>
 	<script src="board.js"></script>
+	<script src="zobrist.js"></script>
 	<script src="game.js"></script>
 	<script>
 		document.addEventListener("DOMContentLoaded", function() {
@@ -135,7 +144,7 @@
 				e.stopPropagation();
 			});
 
-			document.getElementById("help").querySelector(".moves-to-draw").innerText = MOVES_TO_DRAW;
+			document.getElementById("help").querySelector(".moves-to-draw").innerText = Game.CONST.MOVES_TO_DRAW;
 			document.getElementById("help").querySelector(".close").addEventListener("click", function(e) {
 				document.getElementById("help-wrapper").classList.remove("show");
 				e.stopPropagation();
@@ -150,13 +159,16 @@
 				}
 			});
 
-			var match = window.location.hash.match(/#analysis=(-?\d+)(\d)/) || [];
-			new Game(document.getElementById("main"), +match[1] || null, +match[2] || null);
+			var match = window.location.hash.match(/#analysis=(\d)([^#&]+)/) || [];
+			var game = new Game(document.getElementById("main"), match[2] || null, +match[1] || null);
+
+			match = window.location.hash.match(/#pv=([^#&]+)/) || [];
+			game._decodePvAndPlay(match[1]);
 		});
 	</script>
 </head>
 <body class="dark">
-	<h1 id="title" title="Toggle light/dark theme">6-6 Chess <span class="info" title="Help">&#9432;</span></h1>
+	<h1 id="title" title="Toggle light/dark theme">Sixy Chess <span class="info" title="Help">&#9432;</span></h1>
 	<div id="main">
 		<div class="left">
 			<table></table>
@@ -182,15 +194,14 @@
 					<div class="trophy" title="Winner"></div>
 					<div class="handshake" title="Draw"></div>
 					<span>White</span>
-					<div class="player human" data-value="HUMAN"></div>
-					<div class="player computer" data-value="COMPUTER"></div>
+					<div class="player human" title="Human" data-value="HUMAN"></div>
+					<div class="player computer" title="Computer" data-value="COMPUTER"></div>
 				</div>
 				<div class="player-control">
 					<div class="trophy" title="Winner"></div>
-					<div class="handshake" title="Draw"></div>
 					<span>Black</span>
-					<div class="player human" data-value="HUMAN"></div>
-					<div class="player computer" data-value="COMPUTER"></div>
+					<div class="player human" title="Human" data-value="HUMAN"></div>
+					<div class="player computer" title="Computer" data-value="COMPUTER"></div>
 				</div>
 			</div>
 		</div>
@@ -202,6 +213,10 @@
 					<button class="button-undo">&lsaquo;</button>
 					<button class="button-redo">&rsaquo;</button>
 					<button class="button-redo-all">&raquo;</button>
+				</div>
+				<div class="history-control">
+					<div>Game variant</div>
+					<select class="game-variant"></select>
 				</div>
 				<div class="history-control">
 					<button class="button-new-game">New Game</button>
