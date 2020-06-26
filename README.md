@@ -1,5 +1,9 @@
 # Sixy Chess
 
+### 2.1.0
+
+* UI update
+
 ### 2.0.0
 
 * rename to "Sixy Chess"

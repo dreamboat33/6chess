@@ -35,7 +35,12 @@
 		#main .history-control-wrapper { margin-top:3px; }
 		#main .history-control { text-align:center; }
 		#main .history-control button,
-		#main .history-control select { margin:2px 0; width:25px; padding:3px 0; text-align-last:center; }
+		#main .history-control select { margin:2px 0; width:25px; padding:4px 0; text-align-last:center; }
+		#main .history-control button.button-redo,
+		#main .history-control button.button-redo-all,
+		#main .history-control button.button-undo,
+		#main .history-control button.button-undo-all { width:48px; padding:5px 15px; }
+		#main .history-control button.button-take-back,
 		#main .history-control button.button-new-game,
 		#main .history-control button.button-new-analysis,
 		#main .history-control button.button-copy,
@@ -174,7 +179,7 @@
 			<table></table>
 			<div class="wrapper">
 				<div class="computer-settings">
-					<div class="title-wrapper"><span class="title">Evaluation </span><span class="status"></span><span class="interrupt" title="Interrupt evaluation"></span></div>
+					<div class="title-wrapper"><span class="title">Evaluation </span><span class="status"></span><span class="interrupt" title="Interrupt Evaluation (Space)"></span></div>
 					<div class="evaluation">
 						<div class="score"></div>
 						<div class="details-wrapper">
@@ -209,23 +214,28 @@
 			<div class="history"></div>
 			<div class="history-control-wrapper">
 				<div class="history-control">
-					<button class="button-undo-all">&laquo;</button>
-					<button class="button-undo">&lsaquo;</button>
-					<button class="button-redo">&rsaquo;</button>
-					<button class="button-redo-all">&raquo;</button>
+					<button class="button-undo-all" title="History First (Shift+Left)">&laquo;</button>
+					<button class="button-redo-all" title="History Last (Shift+Right)">&raquo;</button>
+				</div>
+				<div class="history-control">
+					<button class="button-undo" title="History Back (Left)">&lsaquo;</button>
+					<button class="button-redo" title="History Next (Right)">&rsaquo;</button>
+				</div>
+				<div class="history-control">
+					<button class="button-take-back" title="Take Back (Backspace)">Take Back</button>
+				</div>
+				<div class="history-control">
+					<button class="button-copy" title="Copy Moves as Text to Clipboard">Copy to Clipboard</button>
 				</div>
 				<div class="history-control">
 					<div>Game variant</div>
 					<select class="game-variant"></select>
 				</div>
 				<div class="history-control">
-					<button class="button-new-game">New Game</button>
+					<button class="button-new-game" title="New Game (N / Shift+N)">New Game</button>
 				</div>
 				<div class="history-control">
 					<button class="button-new-analysis">New Analysis</button>
-				</div>
-				<div class="history-control">
-					<button class="button-copy">Copy to Clipboard</button>
 				</div>
 			</div>
 		</div>
@@ -248,8 +258,6 @@
 					<li>Double click any of your pieces to pass (if and only if you have no legal moves)</li>
 					<li>Click on the evaluation score to toggle its visibility</li>
 					<li>Click on the title to toggle between light and dark themes</li>
-					<li>Hold CTRL while clicking on "New Game" to skip confirmation</li>
-					<li>Game history can be controlled by left and right arrow keys</li>
 				</ul>
 			</div>
 		</div>

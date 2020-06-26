@@ -306,7 +306,7 @@ const Board = (function() {
 		return Board.fromCode(this.toCode());
 	};
 
-	Board.prototype._degreeOfFreedom = function() {
+	Board.prototype._freedom = function() {
 		var degree = 0;
 		for (var player of [P1, P2]) {
 			for (var p of this.pieces[player]) {
@@ -333,11 +333,24 @@ const Board = (function() {
 		return evalResult;
 	};
 
+	Board.prototype.staticEvaluation = function() {
+		if (this.pieces[P1].length * this.pieces[P2].length == 2) { // 2vs1
+			return this.pieces[P1].length - this.pieces[P2].length;
+		}
+		if (this.pieces[P1].length == 2 && this.pieces[P2].length == 2) {
+			return 0;
+		}
+		return (this.pieces[P1].length - this.pieces[P2].length) * 90
+					+ VARIANTS[this.variant].heuristic(this.board)
+					+ this._freedom();
+	};
+
 	Board.prototype.evaluate = function*(timeLimit, maxDepth) {
 		var deadline = Date.now() + timeLimit;
 		var minDepth = maxDepth <= MIN_SEARCH_DEPTH ? MIN_SEARCH_DEPTH : maxDepth >= BASE_SEARCH_DEPTH ? BASE_SEARCH_DEPTH : maxDepth;
 		if (maxDepth < minDepth) maxDepth = minDepth;
 
+		var moves = this.moves();
 		var result = null, stat = { count: 0, table: 0 }, repeats = {}, pvs = {};
 		repeats[this.hash] = 1;
 		depthLoop: for (var depth = minDepth; depth <= maxDepth; depth++) {
@@ -350,7 +363,25 @@ const Board = (function() {
 			}
 			result = evalResult.value;
 			result.depth = depth;
-			// TODO handle zobrist hash collision
+
+			// zobrist hash collision
+			if (moves.length > 0) {
+				var m = result.pv[result.pv.length - 1], matched = false;
+				for (var move of moves) {
+					if (Board.isSameMove(move, m)) {
+						matched = true;
+						break;
+					}
+				}
+				if (!matched) {
+					// got a nonsensical move, assume it is due to zobrist hash collision
+					Board.setTranspositionTableMaxSize(0);
+					result = null;
+					depth = minDepth - 1;
+					continue depthLoop;
+				}
+			}
+
 			if (Math.abs(result.score) >= MATE_BASE && MATE_SCORE - Math.abs(result.score) <= depth) break;
 
 			var tmpHash = this.hash, tmpSide = this.side;
@@ -399,26 +430,13 @@ const Board = (function() {
 			};
 		}
 
-		var moves = this.moves();
-
-		if (depth <= 0) {
-			if (this.pieces[P1].length * this.pieces[P2].length == 2) { // 2vs1
-				return {
-					score: this.pieces[P1].length - this.pieces[P2].length
-				};
-			}
-			if (this.pieces[P1].length == 2 && this.pieces[P2].length == 2) {
-				return {
-					score: 0
-				};
-			}
+		if (depth <= 0 || alpha + ply >= MATE_SCORE || beta - ply <= -MATE_SCORE) {
 			return {
-				score: (this.pieces[P1].length - this.pieces[P2].length) * 90
-						+ VARIANTS[this.variant].heuristic(this.board)
-						+ this._degreeOfFreedom() * 10
+				score: this.staticEvaluation()
 			};
 		}
 
+		var moves = this.moves();
 		if (moves.length > 1) {
 			for (var move of moves) {
 				move.score = getTranspositionTable(Zobrist.update(code, move, this.side), 0);

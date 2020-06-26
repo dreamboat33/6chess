@@ -204,11 +204,25 @@ const Game = (function() {
 		this.redraw();
 	};
 
+	Game.prototype.takeBack = function() {
+		var control1 = this.control[Board.CONST.P1], control2 = this.control[Board.CONST.P2];
+		if (control1 == HUMAN_PLAYER_LABEL && control2 == HUMAN_PLAYER_LABEL) {
+			this.undo(1);
+		} else if (control1 != control2) {
+			var steps = control1 == HUMAN_PLAYER_LABEL && this.board.side == Board.CONST.P1 || control2 == HUMAN_PLAYER_LABEL && this.board.side == Board.CONST.P2 ? 2 : 1;
+			if (this.historyIndex >= steps) {
+				this.undo(steps);
+				this.setPlayerControl(control1, control2);
+			}
+		}
+	};
+
 	Game.prototype.setPlayerControl = function(control1, control2) {
 		this.control[Board.CONST.P1] = control1;
 		this.control[Board.CONST.P2] = control2;
 		this.view.$playerControl[Board.CONST.P1].classList[control1 == HUMAN_PLAYER_LABEL ? "add" : "remove"]("human");
 		this.view.$playerControl[Board.CONST.P2].classList[control2 == HUMAN_PLAYER_LABEL ? "add" : "remove"]("human");
+		this.view.$takeBackButton.disabled = control1 == COMPUTER_PLAYER_LABEL && control2 == COMPUTER_PLAYER_LABEL;
 	};
 
 	Game.prototype.choose = function(id) {
@@ -249,15 +263,34 @@ const Game = (function() {
 
 	Game.prototype.firstDraw = function() {
 		var that = this;
+
+		function confirmNewGame(event) {
+			if (event.ctrlKey || event.shiftKey || confirm("New game?")) {
+				that.newGame(new Board(that.view.$gameVariantSelect.value));
+				that.redraw();
+			}
+		}
+
 		window.addEventListener("keydown", function(e) {
+			if (e.target.matches("input, textarea")) return;
 			switch (e.key) {
 				case "Left":
 				case "ArrowLeft":
-					if (!e.target.matches("input")) that.undo(1);
+					that.undo(e.shiftKey ? Infinity : 1);
 					break;
 				case "Right":
 				case "ArrowRight":
-					if (!e.target.matches("input")) that.redo(1);
+					that.redo(e.shiftKey ? Infinity : 1);
+					break;
+				case "Backspace":
+					that.takeBack();
+					break;
+				case " ":
+					that.interruptEvaluation();
+					break;
+				case "n":
+				case "N":
+					confirmNewGame(e);
 					break;
 			}
 		});
@@ -276,6 +309,10 @@ const Game = (function() {
 				else if (that.board.board[id] == Board.opponentOf(that.board.side)) that.choose(null);
 				else that.play(that.chosen, id);
 			}
+		});
+		document.addEventListener("click", function(e) {
+			if (e.target.matches("td")) return;
+			that.choose(null);
 		});
 
 		var $computerSettings = this.view.$div.querySelector("div.computer-settings");
@@ -321,8 +358,8 @@ const Game = (function() {
 		this.view.$playerControl.wrapper.addEventListener("click", function(e) {
 			if (!e.target.matches(".player")) return;
 			var $playerControl = e.target.closest(".player-control");
-			$playerControl.classList[e.target.dataset.value == HUMAN_PLAYER_LABEL ? "add" : "remove"]("human");
 			that.control[$playerControl.dataset.player] = e.target.dataset.value;
+			that.setPlayerControl(that.control[Board.CONST.P1], that.control[Board.CONST.P2]);
 			that.scheduleComputerPlay();
 		});
 		this.view.$playerControl[Board.CONST.P1] = this.view.$playerControl.wrapper.querySelectorAll("div.player-control")[0];
@@ -368,16 +405,13 @@ const Game = (function() {
 			that.redraw();
 		});
 
-		this.view.$div.querySelector("button.button-new-game").addEventListener("click", function(e) {
-			if (e.ctrlKey || confirm("New game?")) {
-				that.newGame(new Board(that.view.$gameVariantSelect.value));
-				that.redraw();
-			}
-		});
+		this.view.$div.querySelector("button.button-new-game").addEventListener("click", function(e) { confirmNewGame(e); });
 		this.view.$div.querySelector("button.button-undo-all").addEventListener("click", function() { that.undo(Infinity); });
 		this.view.$div.querySelector("button.button-undo").addEventListener("click", function() { that.undo(1); });
 		this.view.$div.querySelector("button.button-redo").addEventListener("click", function() { that.redo(1); });
 		this.view.$div.querySelector("button.button-redo-all").addEventListener("click", function() { that.redo(Infinity); });
+		this.view.$takeBackButton = this.view.$div.querySelector("button.button-take-back");
+		this.view.$takeBackButton.addEventListener("click", function() { that.takeBack(); });
 		this.view.$div.querySelector("button.button-new-analysis").addEventListener("click", function() {
 			window.open("#analysis=" + that.currentFlip + that.board.toCode());
 		});
@@ -423,8 +457,8 @@ const Game = (function() {
 
 	Game.prototype._nameMove = function(move) {
 		return (Board.isPassMove(move)
-					? "PASS"
-					: this._nameIndex(this.board._flipPiece(move.from, this.currentFlip)) + this._nameIndex(this.board._flipPiece(move.to, this.currentFlip)) + (move.taken.length > 0 ? "+" : ""));
+				? "PASS"
+				: this._nameIndex(this.board._flipPiece(move.from, this.currentFlip)) + this._nameIndex(this.board._flipPiece(move.to, this.currentFlip)) + (move.taken.length > 0 ? "+" : ""));
 	};
 
 	Game.prototype._principalVariationString = function() {
